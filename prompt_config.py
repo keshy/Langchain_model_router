@@ -4,7 +4,7 @@ from langchain import PromptTemplate, OpenAI, LLMChain
 import yaml
 
 
-class Config:
+class RouterConfig:
     def __init__(self, llm=None):
         self.chain_map = {}
         chroma_client = chromadb.Client()
@@ -33,5 +33,5 @@ class Config:
 
 
 if __name__ == '__main__':
-    b = Config()
+    b = RouterConfig()
     c = b.get_chains()

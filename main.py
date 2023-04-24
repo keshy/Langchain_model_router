@@ -1,3 +1,4 @@
+import re
 from typing import Dict, List
 
 from chromadb.api.models.Collection import Collection
@@ -6,18 +7,18 @@ from langchain.chains.base import Chain
 from langchain.chains.conversation.prompt import PROMPT
 from langchain.input import get_color_mapping
 from langchain.llms import OpenAI
-from langchain.memory import ConversationBufferMemory, ConversationBufferWindowMemory
+from langchain.memory import ConversationBufferWindowMemory
 from langchain.schema import BaseMemory
 from pydantic import Extra, Field, root_validator
-from prompt_config import Config
-import re
+
+from prompt_config import RouterConfig
 
 
 class ConversationalRouterChain(LLMChain):
     """Router chain that picks the most relevant model to call based on vector queries.
     The chain also has inherent memory for conversational chat applications"""
 
-    memory: BaseMemory = Field(default_factory=ConversationBufferMemory)
+    memory: BaseMemory = Field(default_factory=ConversationBufferWindowMemory(k=1))
     """Default memory store."""
     prompt: BasePromptTemplate = PROMPT
     """Default conversation prompt to use."""
@@ -48,6 +49,10 @@ class ConversationalRouterChain(LLMChain):
         :meta private:
         """
         return [self.output_key]
+
+    @property
+    def _chain_type(self) -> str:
+        return "conversational_router_chain"
 
     def _call(self, inputs: Dict[str, str]) -> Dict[str, str]:
         _input = inputs[self.input_key]
@@ -103,9 +108,10 @@ if __name__ == "__main__":
     # set up LLM
     llm = OpenAI(temperature=0.3)
     # define chain map - add any model here.
-    c = Config()
+    chain_config = RouterConfig()
     # set up router chain
-    router_chain = ConversationalRouterChain(llm=llm, chains=c.get_chains(), vector_collection=c.get_embedding(),
+    router_chain = ConversationalRouterChain(llm=llm, chains=chain_config.get_chains(),
+                                             vector_collection=chain_config.get_embedding(),
                                              memory=ConversationBufferWindowMemory(k=1), verbose=True)
     # inference
     while True:
