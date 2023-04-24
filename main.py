@@ -1,3 +1,6 @@
+import argparse
+import importlib
+import json
 import re
 from typing import Dict, List
 
@@ -10,6 +13,8 @@ from langchain.llms import OpenAI
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.schema import BaseMemory
 from pydantic import Extra, Field, root_validator
+from pydantic.class_validators import Optional
+from post_processors import onboarding_code_gen
 
 from prompt_config import RouterConfig
 
@@ -24,6 +29,8 @@ class ConversationalRouterChain(LLMChain):
     """Default conversation prompt to use."""
     last_chain: Chain = None
     chains: Dict[str, Chain]
+    post_processors: Dict[str, Optional[str]]
+    pre_processors: Dict[str, Optional[str]]
     strip_outputs: bool = False
     input_key: str = "input"  #: :meta private:
     output_key: str = "output"  #: :meta private:
@@ -71,16 +78,33 @@ class ConversationalRouterChain(LLMChain):
         # picking a guardrail where if the AI response is way off - then just use the same model as the previous
         # one to continue conversing.
         if self.chains.get(classification['classification']) and distance <= 1.5:
-            _input = self.chains[classification['classification']](_input)
+            keys = self.chains.get(classification['classification']).input_keys
+            param = {
+                "question": _input,
+            }
+            if 'context' in keys and self.pre_processors.get(mname):
+                module = importlib.import_module('pre_processors.' + self.pre_processors[mname].rstrip('.py'))
+                func = getattr(module, 'contextualize')
+                context = func()
+                param['context'] = context
+            _input = self.chains[classification['classification']](param)
         else:
             if self.last_chain:
                 mname = last_chain_name[0]
                 _input = self.last_chain(_input)
             else:
-                raise ValueError("Suitable destination chain not found for %s type" % classification['classification'])
+                raise ValueError(
+                    "Suitable destination chain not found for this question. Distance computed from nearest match: " +
+                    str(distance))
         self.callback_manager.on_text(
             str(_input['text']), color=color_mapping[mname], end="\n", verbose=self.verbose
         )
+        # check for any post processing hooks.
+        if self.post_processors.get(mname):
+            module = importlib.import_module('post_processors.' + self.post_processors[mname].rstrip('.py'))
+            func = getattr(module, 'responder')
+            _input['text'] = func(json.loads(_input['text'].replace('Answer:', '')))
+        print('AI:' + _input['text'])
         return {self.output_key: '<chain>' + classification['classification'] + '</chain>' + _input['text']}
 
     @root_validator()
@@ -105,13 +129,19 @@ class ConversationalRouterChain(LLMChain):
 
 
 if __name__ == "__main__":
+    arg_parser = argparse.ArgumentParser()
+    arg_parser.add_argument('-s', '--spec', required=False, default='model_specs.yml', type=str,
+                            help="Spec file used for creating model chain map")
+    args = arg_parser.parse_args()
     # set up LLM
     llm = OpenAI(temperature=0.3)
     # define chain map - add any model here.
-    chain_config = RouterConfig()
+    chain_config = RouterConfig(llm=llm, spec=args.spec)
     # set up router chain
     router_chain = ConversationalRouterChain(llm=llm, chains=chain_config.get_chains(),
                                              vector_collection=chain_config.get_embedding(),
+                                             pre_processors=chain_config.get_pre_processor_per_chain(),
+                                             post_processors=chain_config.get_post_processor_per_chain(),
                                              memory=ConversationBufferWindowMemory(k=1), verbose=True)
     # inference
     while True:
