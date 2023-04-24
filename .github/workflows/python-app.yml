@@ -40,9 +40,9 @@ jobs:
     - name: Vuln Check
       env: 
         SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        run: |
-          curl https://static.snyk.io/cli/latest/snyk-linux -o snyk
-          chmod +x ./snyk
-          mv ./snyk /usr/local/bin/
-          pip install -r requirements.txt
-          snyk test
+      run: |
+        curl https://static.snyk.io/cli/latest/snyk-linux -o snyk
+        chmod +x ./snyk
+        mv ./snyk /usr/local/bin/
+        pip install -r requirements.txt
+        snyk test
